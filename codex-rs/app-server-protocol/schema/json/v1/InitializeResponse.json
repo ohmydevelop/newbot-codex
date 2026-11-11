@@ -23,6 +23,14 @@
       "description": "Operating system for the running app-server target, for example `\"macos\"`, `\"linux\"`, or `\"windows\"`.",
       "type": "string"
     },
+    "runtimeCapabilities": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "default": {},
+      "description": "Runtime extensions supported by this fixed host build.",
+      "type": "object"
+    },
     "userAgent": {
       "type": "string"
     }

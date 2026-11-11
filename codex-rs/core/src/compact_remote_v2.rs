@@ -296,6 +296,11 @@ async fn run_remote_compaction_request_v2(
     transport: &mut CompactionRequestTransport<'_>,
     submitted_audio: Option<&crate::context_manager::rejected_audio::SubmittedFileAudio>,
 ) -> CodexResult<RemoteCompactionV2Output> {
+    let mut captured_prompt = prompt.clone();
+    if let Some(route) = &step_context.settings.model_route {
+        route.prepare_prompt(&mut captured_prompt)?;
+    }
+    let prompt = &captured_prompt;
     let turn_context = &step_context.turn;
     let client_session = match transport {
         CompactionRequestTransport::Background(turn_state, auth_owner) => {
@@ -306,8 +311,17 @@ async fn run_remote_compaction_request_v2(
                 .await;
             let trace = InferenceTraceContext::disabled();
             // Replay the routing token without letting this request change foreground routing.
-            let turn_state = Arc::new(turn_state.clone().map(OnceLock::from).unwrap_or_default());
-            let http_executor = ResponsesHttpExecutor::new(&sess.services.model_client);
+            let turn_state = Arc::new(if settings.model_route.is_some() {
+                OnceLock::new()
+            } else {
+                turn_state.clone().map(OnceLock::from).unwrap_or_default()
+            });
+            let client = settings
+                .model_route
+                .as_ref()
+                .map(|r| &r.client)
+                .unwrap_or(&sess.services.model_client);
+            let http_executor = ResponsesHttpExecutor::new(client);
             let stream = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return Err(CodexErr::TurnAborted),
@@ -327,9 +341,15 @@ async fn run_remote_compaction_request_v2(
         }
         CompactionRequestTransport::Foreground(client_session) => client_session,
     };
-    let settings = &turn_context.initial_settings;
-    let max_retries = turn_context
-        .provider
+    let settings = &step_context.settings;
+    if let Some(route) = &settings.model_route {
+        client_session.select_client(&route.client);
+    }
+    let max_retries = settings
+        .model_route
+        .as_ref()
+        .map(|r| &r.provider)
+        .unwrap_or(&turn_context.provider)
         .info()
         .stream_max_retries()
         .min(MAX_REMOTE_COMPACTION_V2_STREAM_RETRIES);

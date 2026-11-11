@@ -525,6 +525,7 @@ fn configured_plugins_from_stack_merges_enabled_effective_layers() {
             (
                 "base".to_string(),
                 PluginConfig {
+                    local_root: None,
                     enabled: Some(true),
                     remote_plugin_id: None,
                     release_id: None,
@@ -536,6 +537,7 @@ fn configured_plugins_from_stack_merges_enabled_effective_layers() {
             (
                 "profile".to_string(),
                 PluginConfig {
+                    local_root: None,
                     enabled: Some(true),
                     remote_plugin_id: None,
                     release_id: None,
@@ -547,6 +549,7 @@ fn configured_plugins_from_stack_merges_enabled_effective_layers() {
             (
                 "system".to_string(),
                 PluginConfig {
+                    local_root: None,
                     enabled: Some(true),
                     remote_plugin_id: None,
                     release_id: None,

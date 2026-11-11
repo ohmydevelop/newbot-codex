@@ -48,6 +48,7 @@ export type { InputModality } from "./InputModality";
 export type { InternalChatMessageMetadataPassthrough } from "./InternalChatMessageMetadataPassthrough";
 export type { InternalSessionSource } from "./InternalSessionSource";
 export type { LegacyAppPathString } from "./LegacyAppPathString";
+export type { LiveModelRouteSelection } from "./LiveModelRouteSelection";
 export type { LocalShellAction } from "./LocalShellAction";
 export type { LocalShellExecAction } from "./LocalShellExecAction";
 export type { LocalShellStatus } from "./LocalShellStatus";

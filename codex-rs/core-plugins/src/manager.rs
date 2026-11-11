@@ -3139,7 +3139,8 @@ impl PluginsManager {
                 &config.config_layer_stack,
                 self.codex_home.as_path(),
             )
-            .into_keys()
+            .into_iter()
+            .filter_map(|(id, plugin)| plugin.local_root.is_none().then_some(id))
             .collect::<Vec<_>>();
             configured_plugin_keys.sort_unstable();
             match refresh_non_curated_plugin_cache_force_reinstall_detailed(

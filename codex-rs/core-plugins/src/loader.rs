@@ -393,6 +393,7 @@ pub fn remote_installed_plugins_to_config(
             Some((
                 plugin_id.as_key(),
                 PluginConfig {
+                    local_root: None,
                     enabled: Some(plugin.enabled),
                     remote_plugin_id: None,
                     release_id: None,
@@ -860,10 +861,14 @@ async fn load_plugin(
     scope: &PluginLoadScope<'_>,
 ) -> LoadedPlugin<McpServerConfig> {
     let plugin_id = PluginId::parse(&config_name);
-    let active_plugin_installation = plugin_id
-        .as_ref()
-        .ok()
-        .and_then(|plugin_id| store.active_plugin_installation(plugin_id));
+    let active_plugin_installation =
+        plugin_id
+            .as_ref()
+            .ok()
+            .and_then(|plugin_id| match &plugin.local_root {
+                Some(root) => Some(store.pinned_installation(plugin_id, root.clone())),
+                None => store.active_plugin_installation(plugin_id),
+            });
     let root = active_plugin_installation
         .as_ref()
         .map(|installation| installation.root.clone())

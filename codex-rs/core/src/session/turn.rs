@@ -292,7 +292,16 @@ pub(crate) async fn run_turn(
             .await;
         // Publish the failure only after prompt hooks finish, so clients cannot react to
         // an error by steering follow-up input into a turn still preserving its prompt.
-        let message_prefix = match turn_context.provider.capabilities().remote_compaction {
+        let message_prefix = match turn_context
+            .next_step_settings
+            .load()
+            .model_route
+            .as_ref()
+            .map(|r| &r.provider)
+            .unwrap_or(&turn_context.provider)
+            .capabilities()
+            .remote_compaction
+        {
             RemoteCompactionSupport::V2 => Some("Error running remote compact task".to_string()),
             RemoteCompactionSupport::Unsupported => None,
         };
@@ -1719,7 +1728,16 @@ async fn run_auto_compact(
         return Ok(true);
     }
 
-    match turn_context.provider.capabilities().remote_compaction {
+    match turn_context
+        .next_step_settings
+        .load()
+        .model_route
+        .as_ref()
+        .map(|r| &r.provider)
+        .unwrap_or(&turn_context.provider)
+        .capabilities()
+        .remote_compaction
+    {
         RemoteCompactionSupport::V2 => {
             let has_candidate = candidate.is_some();
             if !has_candidate {
@@ -1918,7 +1936,14 @@ async fn run_sampling_request(
         Arc::clone(&step_context),
         Arc::clone(&turn_diff_tracker),
     );
-    let max_retries = turn_context.provider.info().stream_max_retries();
+    let max_retries = step_context
+        .settings
+        .model_route
+        .as_ref()
+        .map(|r| &r.provider)
+        .unwrap_or(&turn_context.provider)
+        .info()
+        .stream_max_retries();
     let incremental_tools = sess
         .current_window_uses_incremental_tools(&step_context)
         .await;
@@ -2478,6 +2503,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::ContextCompacted(_)
         | EventMsg::ThreadRolledBack(_)
         | EventMsg::TurnStarted(_)
+        | EventMsg::TurnSettingsApplied(_)
         | EventMsg::ThreadSettingsApplied(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)
@@ -2895,13 +2921,23 @@ async fn try_run_sampling_request(
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     turn_diff_tracker: SharedTurnDiffTracker,
-    prompt: Prompt,
+    mut prompt: Prompt,
     mut pending_audio: Option<codex_history::AcceptedFileAudio>,
     input_item_count: usize,
     cancellation_token: CancellationToken,
     draining_for_mailbox: &mut bool,
 ) -> CodexResult<SamplingRequestResult> {
     let turn_context = Arc::clone(&step_context.turn);
+    if let Some(route) = &step_context.settings.model_route {
+        route.prepare_prompt(&mut prompt)?;
+        client_session.select_client(&route.client);
+    }
+    let provider = step_context
+        .settings
+        .model_route
+        .as_ref()
+        .map(|r| &r.provider)
+        .unwrap_or(&turn_context.provider);
     feedback_tags!(
         model = step_context.settings.model_info.slug.clone(),
         approval_policy = turn_context.approval_policy(),
@@ -2918,7 +2954,7 @@ async fn try_run_sampling_request(
     let inference_trace = sess.services.rollout_thread_trace.inference_trace_context(
         turn_context.sub_id.as_str(),
         step_context.settings.model_info.slug.as_str(),
-        turn_context.provider.info().name.as_str(),
+        provider.info().name.as_str(),
     );
     if client_session.inference_tools_changed(&step_context.tool_router.model_visible_specs()) {
         turn_context.turn_timing_state.record_tools_change();
@@ -2934,7 +2970,7 @@ async fn try_run_sampling_request(
         .config
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
-        && turn_context.provider.info().is_openai();
+        && provider.info().is_openai();
     let mut preempt = step_context.preempt.clone().unwrap_or_default();
     let effort = sess
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
@@ -3025,6 +3061,18 @@ async fn try_run_sampling_request(
             return Err(error);
         }
     };
+    if let Some(route) = &step_context.settings.model_route {
+        sess.send_event(
+            &turn_context,
+            EventMsg::TurnSettingsApplied(codex_protocol::protocol::TurnSettingsAppliedEvent {
+                revision: route.revision,
+                provider_id: route.provider_id.clone(),
+                model: step_context.settings.model_info.slug.clone(),
+                effort: step_context.settings.effective_reasoning_effort(),
+            }),
+        )
+        .await;
+    }
     let can_interrupt = turn_context
         .config
         .features

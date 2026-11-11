@@ -6891,6 +6891,45 @@
       ],
       "type": "object"
     },
+    "TurnSettingsAppliedNotification": {
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "providerId",
+        "revision",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "TurnStartedNotification": {
       "properties": {
         "threadId": {
@@ -8521,6 +8560,26 @@
         "params"
       ],
       "title": "Thread/compactedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/settings/applied"
+          ],
+          "title": "Turn/settings/appliedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/TurnSettingsAppliedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Turn/settings/appliedNotification",
       "type": "object"
     },
     {

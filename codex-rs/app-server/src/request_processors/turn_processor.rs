@@ -259,6 +259,51 @@ impl TurnRequestProcessor {
             .await?;
         let environments =
             resolve_turn_environment_requests(self.thread_manager.as_ref(), params.environments)?;
+        let model_route = if let Some(mut route) = params.model_route {
+            if route.provider_id.is_empty() || route.provider_id.len() > 128 {
+                return Err(invalid_request("invalid model provider identifier"));
+            }
+            let current = thread.config().await;
+            let requested = route.provider.clone();
+            let mut overrides = std::collections::HashMap::from([(
+                "model_provider".to_owned(),
+                serde_json::json!(route.provider_id),
+            )]);
+            if !requested.is_null() {
+                overrides.insert(
+                    "model_providers".to_owned(),
+                    serde_json::json!({route.provider_id.clone():requested}),
+                );
+            }
+            let config = self
+                .config_manager
+                .load_for_cwd(
+                    Some(overrides),
+                    codex_core::config::ConfigOverrides {
+                        cwd: Some(current.cwd.to_path_buf()),
+                        ..Default::default()
+                    },
+                    Some(current.cwd.to_path_buf()),
+                )
+                .await
+                .map_err(|_| invalid_request("destination provider configuration was rejected"))?;
+            if config.model_provider_id != route.provider_id {
+                return Err(invalid_request(
+                    "destination provider conflicts with managed policy",
+                ));
+            }
+            self.config_manager
+                .check_thread_model_provider(&config)
+                .await
+                .map_err(|_| {
+                    invalid_request("destination provider conflicts with managed policy")
+                })?;
+            route.provider = serde_json::to_value(&config.model_provider)
+                .map_err(|_| invalid_request("invalid destination provider"))?;
+            Some(route)
+        } else {
+            None
+        };
         let (reply, outcome) = oneshot::channel();
         self.submit_core_op(
             request_id,
@@ -266,6 +311,7 @@ impl TurnRequestProcessor {
             Op::TurnSettings {
                 turn_id: params.turn_id,
                 update: TurnSettingsUpdate {
+                    model_route,
                     approvals_reviewer: params
                         .approvals_reviewer
                         .map(codex_app_server_protocol::ApprovalsReviewer::to_core),

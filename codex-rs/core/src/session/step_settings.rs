@@ -39,6 +39,7 @@ pub(crate) struct StepSettings {
 /// snapshot does not change steps or actions that have already captured it.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedStepSettings {
+    pub(crate) model_route: Option<Arc<LiveModelRoute>>,
     /// Inputs for later sparse patches. Unset defaults and unsupported requested
     /// tiers must not be reconstructed from the effective values below.
     selected: Arc<StepSettings>,
@@ -50,6 +51,48 @@ pub(crate) struct ResolvedStepSettings {
     /// MCP historically follows refreshed thread defaults. Preserve that behavior
     /// for older clients until this turn receives an explicit live reviewer update.
     pub(crate) mcp_approvals_reviewer_override: Option<ApprovalsReviewer>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LiveModelRoute {
+    pub(crate) provider_id: String,
+    pub(crate) provider: codex_model_provider::SharedModelProvider,
+    pub(crate) client: crate::client::ModelClient,
+    pub(crate) revision: u64,
+    pub(crate) canonical_history_only: bool,
+}
+
+impl LiveModelRoute {
+    pub(crate) fn prepare_prompt(
+        &self,
+        prompt: &mut crate::client_common::Prompt,
+    ) -> codex_protocol::error::Result<()> {
+        if !self.canonical_history_only {
+            return Ok(());
+        }
+        for item in &mut prompt.input {
+            if matches!(
+                item,
+                codex_protocol::models::ResponseItem::Compaction { .. }
+                    | codex_protocol::models::ResponseItem::ContextCompaction {
+                        encrypted_content: Some(_),
+                        ..
+                    }
+            ) {
+                return Err(codex_protocol::error::CodexErr::UnsupportedOperation(
+                    "cross-provider routing requires readable history; this window contains provider-specific compaction".into()));
+            }
+            item.clear_encrypted_content();
+            item.clear_internal_chat_message_metadata_passthrough();
+            item.set_id(None);
+        }
+        prompt.input.retain(|item| {
+            !matches!(item,
+            codex_protocol::models::ResponseItem::Reasoning {summary,content, ..}
+                if summary.is_empty() && content.as_ref().is_none_or(|content| content.is_empty()))
+        });
+        Ok(())
+    }
 }
 
 impl ResolvedStepSettings {
@@ -65,6 +108,7 @@ impl ResolvedStepSettings {
         let service_tier =
             super::get_service_tier(selected.service_tier.clone(), features, &model_info);
         Self {
+            model_route: None,
             selected,
             model_info,
             reasoning_summary,
@@ -136,6 +180,7 @@ impl ResolvedStepSettings {
                 Arc::new(selected.resolve_model_info(models_manager, overrides).await)
             };
         let mut next = Self::new(Arc::new(selected), model_info, features);
+        next.model_route = self.model_route.clone();
         next.mcp_approvals_reviewer_override = update
             .approvals_reviewer
             .or(self.mcp_approvals_reviewer_override);

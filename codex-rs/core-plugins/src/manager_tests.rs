@@ -3437,6 +3437,7 @@ fn loaded_plugins_cache_evicts_least_recently_used_configuration() {
             configured_plugins: HashMap::from([(
                 format!("plugin-{index}@test"),
                 PluginConfig {
+                    local_root: None,
                     enabled: Some(true),
                     remote_plugin_id: None,
                     release_id: None,

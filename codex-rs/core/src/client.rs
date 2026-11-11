@@ -651,6 +651,35 @@ impl ModelClient {
         }
     }
 
+    pub(crate) fn for_model_provider(&self, provider: SharedModelProvider) -> Self {
+        let s = &self.state;
+        let mut next = Self::new(
+            provider,
+            self.agent_identity_policy.clone(),
+            s.thread_id,
+            s.item_id_generator.clone(),
+            s.session_source.clone(),
+            s.originator.clone(),
+            s.model_verbosity,
+            s.content_item_kinds_enabled,
+            s.reasoning_effort_override_enabled,
+            s.enable_request_compression,
+            s.include_timing_metrics,
+            s.beta_features_header.clone(),
+            s.concurrent_reasoning_summaries_enabled,
+            s.output_token_replay_enabled,
+            s.attestation_provider.clone(),
+            self.http_client_factory.clone(),
+            s.workspace_routing.clone(),
+            self.request_contributors.clone(),
+        );
+        next.prompt_cache_key_policy = self.prompt_cache_key_policy.clone();
+        next.session_id_override = self.session_id_override.clone();
+        next.event_sender = self.event_sender.clone();
+        next.executed_tool_calls = self.executed_tool_calls.clone();
+        next.restored_history = true;
+        next
+    }
     pub(crate) fn with_executed_tool_calls(mut self, recorder: ExecutedToolCalls) -> Self {
         self.executed_tool_calls = Some(recorder);
         self
@@ -1602,6 +1631,11 @@ impl Drop for ModelClientSession {
 }
 
 impl ModelClientSession {
+    pub(crate) fn select_client(&mut self, client: &ModelClient) {
+        if !Arc::ptr_eq(&self.client.state, &client.state) {
+            *self = client.new_session();
+        }
+    }
     pub(crate) fn inference_tools_changed(&self, tools: &Arc<[ToolSpec]>) -> bool {
         let previous = self
             .client

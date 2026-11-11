@@ -533,8 +533,9 @@ impl ConfigManager {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         });
-        if let Some(saved) = saved_provider {
-            typesafe_overrides.model_provider = Some(saved.to_owned());
+        // Explicit host routing wins; otherwise retain the historical selection.
+        if let Some(provider) = requested_provider.as_deref().or(saved_provider) {
+            typesafe_overrides.model_provider = Some(provider.to_owned());
         }
         self.load_with_validation(
             &self.current_cli_overrides(),
@@ -547,11 +548,9 @@ impl ConfigManager {
                     .or(saved_provider)
                     .or(config.model_provider.as_deref())
                     .unwrap_or("openai");
-                // Validate the saved route even when a client sends a provider override.
-                for provider in [
-                    saved_provider.unwrap_or(requested_provider),
-                    requested_provider,
-                ] {
+                // Saved route identity is provenance. Validate the selected route
+                // against managed requirements; a default change is not authority.
+                for provider in [requested_provider] {
                     if let Some(required) = layers.required_model_provider()
                         && required != provider
                     {
@@ -574,14 +573,6 @@ impl ConfigManager {
                             },
                         ));
                     }
-                }
-                if let Some(saved) = saved_provider
-                    && saved != requested_provider
-                {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!("Cannot change this thread's model provider from `{saved}` to `{requested_provider}` on resume."),
-                    ));
                 }
                 Ok(())
             },

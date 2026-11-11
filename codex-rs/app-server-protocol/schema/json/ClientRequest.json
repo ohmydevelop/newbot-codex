@@ -1915,6 +1915,27 @@
       },
       "type": "object"
     },
+    "LiveModelRouteSelection": {
+      "additionalProperties": false,
+      "description": "Host-owned route parameters. Debug intentionally excludes credentials.",
+      "properties": {
+        "provider": true,
+        "providerId": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "providerId",
+        "revision"
+      ],
+      "type": "object"
+    },
     "LocalShellAction": {
       "oneOf": [
         {

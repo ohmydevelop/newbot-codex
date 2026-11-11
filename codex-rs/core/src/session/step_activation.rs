@@ -236,7 +236,8 @@ impl Session {
         turn_id: &str,
         update: TurnSettingsUpdate,
     ) -> TurnSettingsUpdateOutcome {
-        let updates_model_settings = update.model.is_some()
+        let updates_model_settings = update.model_route.is_some()
+            || update.model.is_some()
             || update.effort.is_some()
             || update.summary.is_some()
             || update.service_tier.is_some();
@@ -270,6 +271,7 @@ impl Session {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
         let TurnSettingsUpdate {
+            model_route,
             approvals_reviewer,
             environments: environment_requests,
             model,
@@ -326,10 +328,72 @@ impl Session {
         {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         }
-        let updated_settings = match prepared {
+        let mut updated_settings = match prepared {
             Ok(settings) => settings,
             Err(reason) => return TurnSettingsUpdateOutcome::Rejected { reason },
         };
+        if let Some(selection) = model_route {
+            if current
+                .model_route
+                .as_ref()
+                .is_some_and(|r| selection.revision <= r.revision)
+            {
+                return TurnSettingsUpdateOutcome::Rejected {
+                    reason: "stale model route revision".into(),
+                };
+            }
+            let info: codex_model_provider_info::ModelProviderInfo =
+                match serde_json::from_value(selection.provider) {
+                    Ok(info) => info,
+                    Err(_) => {
+                        return TurnSettingsUpdateOutcome::Rejected {
+                            reason: "invalid provider parameters".into(),
+                        };
+                    }
+                };
+            if info.wire_api != codex_model_provider_info::WireApi::Responses {
+                return TurnSettingsUpdateOutcome::Rejected {
+                    reason: "live routes require Responses-compatible providers".into(),
+                };
+            }
+            let canonical_history_only = current
+                .model_route
+                .as_ref()
+                .is_some_and(|r| r.canonical_history_only)
+                || selection.provider_id != turn_context.config.model_provider_id
+                || info != turn_context.config.model_provider;
+            if canonical_history_only
+                && self.clone_history().await.raw_items().any(|item| {
+                    matches!(
+                        item,
+                        codex_protocol::models::ResponseItem::Compaction { .. }
+                            | codex_protocol::models::ResponseItem::ContextCompaction {
+                                encrypted_content: Some(_),
+                                ..
+                            }
+                    )
+                })
+            {
+                return TurnSettingsUpdateOutcome::Rejected {reason:"cross-provider routing requires readable history; opaque compaction cannot be transferred".into()};
+            }
+            let provider = codex_model_provider::create_model_provider(
+                info,
+                self.services.model_client.auth_manager(),
+            );
+            let client = self
+                .services
+                .model_client
+                .for_model_provider(Arc::clone(&provider));
+            if let Some(settings) = updated_settings.as_mut() {
+                settings.model_route = Some(Arc::new(super::step_settings::LiveModelRoute {
+                    provider_id: selection.provider_id,
+                    provider,
+                    client,
+                    revision: selection.revision,
+                    canonical_history_only,
+                }));
+            }
+        }
         let candidate_settings = updated_settings.as_ref().unwrap_or(current.as_ref());
 
         // Recheck the latest rules before applying the update.
@@ -342,6 +406,43 @@ impl Session {
         let current_environments = self.services.turn_environments.selections();
         let proposed = environments.as_deref().unwrap_or(&current_environments);
         let validation = (|| {
+            if candidate_settings.model_route.is_some() {
+                let destination = &candidate_settings.model_info;
+                let budget = destination
+                    .usable_context_window()
+                    .filter(|budget| *budget > 0)
+                    .ok_or_else(|| "destination has no verified context budget".to_owned())?;
+                let required = state
+                    .history
+                    .estimate_token_count(&turn_context)
+                    .ok_or_else(|| "history size cannot be verified".to_owned())?;
+                if required > budget {
+                    return Err("history exceeds the destination context budget".to_owned());
+                }
+                for item in state.history.raw_items() {
+                    let value = serde_json::to_value(item)
+                        .map_err(|_| "history format cannot be verified".to_owned())?;
+                    for (kind, modality) in [
+                        (
+                            "input_image",
+                            codex_protocol::openai_models::InputModality::Image,
+                        ),
+                        (
+                            "input_audio",
+                            codex_protocol::openai_models::InputModality::Audio,
+                        ),
+                    ] {
+                        if contains_content_kind(&value, kind)
+                            && !destination.input_modalities.contains(&modality)
+                        {
+                            return Err(
+                                "destination does not support a retained input modality".to_owned()
+                            );
+                        }
+                    }
+                }
+            }
+
             if let Some(configs) = environment_config_validation {
                 validate_environment_ids_and_cwds(
                     &self.services.turn_environments.environment_manager(),
@@ -361,6 +462,18 @@ impl Session {
                 proposed,
             )
             .map_err(|error| error.to_string())?;
+            if let Some(route) = &candidate_settings.model_route {
+                let config = &state.session_configuration.original_config_do_not_use;
+                if config
+                    .config_layer_stack
+                    .required_model_provider()
+                    .is_some_and(|required| required != route.provider_id)
+                {
+                    return Err(
+                        "destination provider conflicts with current managed policy".to_owned()
+                    );
+                }
+            }
             // Neither a reviewer nor an environment change changes model-owned authority.
             if requires_model_switching {
                 check_legacy_turn_safety(
@@ -486,3 +599,18 @@ fn any_environment_has_full_disk_write(
 #[cfg(test)]
 #[path = "step_activation_tests.rs"]
 mod tests;
+
+fn contains_content_kind(value: &serde_json::Value, kind: &str) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => {
+            fields.get("type").and_then(serde_json::Value::as_str) == Some(kind)
+                || fields
+                    .values()
+                    .any(|value| contains_content_kind(value, kind))
+        }
+        serde_json::Value::Array(items) => {
+            items.iter().any(|value| contains_content_kind(value, kind))
+        }
+        _ => false,
+    }
+}

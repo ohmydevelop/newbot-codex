@@ -555,6 +555,7 @@ pub struct ConversationSpeechParams {
 /// task kind. Child sessions and consumers of frozen initial settings are unchanged.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TurnSettingsUpdate {
+    pub model_route: Option<LiveModelRouteSelection>,
     /// Changes the reviewer for subsequent approval requests, not pending reviews.
     pub approvals_reviewer: Option<ApprovalsReviewer>,
     /// Replaces the selection for subsequent steps, without changing future turns.
@@ -567,6 +568,30 @@ pub struct TurnSettingsUpdate {
     pub summary: Option<ReasoningSummaryConfig>,
     /// `None` preserves the requested tier; `Some(None)` clears it.
     pub service_tier: Option<Option<String>>,
+}
+
+/// Host-owned route parameters. Debug intentionally excludes credentials.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LiveModelRouteSelection {
+    pub provider_id: String,
+    pub provider: serde_json::Value,
+    pub revision: u64,
+}
+impl std::fmt::Debug for LiveModelRouteSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveModelRouteSelection")
+            .field("provider_id", &self.provider_id)
+            .field("revision", &self.revision)
+            .finish_non_exhaustive()
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct TurnSettingsAppliedEvent {
+    pub revision: u64,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: Option<ReasoningEffortConfig>,
 }
 
 /// The result of processing a turn-settings update, not merely queueing it.
@@ -1607,6 +1632,9 @@ pub enum EventMsg {
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
     ThreadSettingsApplied(ThreadSettingsAppliedEvent),
+
+    /// A captured route has actually begun a model request.
+    TurnSettingsApplied(TurnSettingsAppliedEvent),
 
     /// Agent has completed all actions.
     /// v1 wire format uses `task_complete`; accept `turn_complete` for v2 interop.

@@ -107,7 +107,8 @@ impl PluginMarketplaceContext {
                     &scope.config.config_layer_stack,
                     manager.codex_home.as_path(),
                 )
-                .into_keys()
+                .into_iter()
+                .filter_map(|(id, plugin)| plugin.local_root.is_none().then_some(id))
             })
             .collect::<HashSet<_>>();
 

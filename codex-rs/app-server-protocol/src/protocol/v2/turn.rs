@@ -51,6 +51,8 @@ pub enum TurnStatus {
 pub struct TurnSettingsUpdateParams {
     pub thread_id: String,
     pub turn_id: String,
+    #[ts(optional = nullable)]
+    pub model_route: Option<codex_protocol::protocol::LiveModelRouteSelection>,
     /// Changes the active turn's reviewer without changing future thread settings.
     /// Already captured steps and pending approvals retain their original reviewer.
     #[ts(optional = nullable)]
@@ -674,5 +676,37 @@ impl From<CorePlanStepStatus> for TurnPlanStepStatus {
             CorePlanStepStatus::InProgress => Self::InProgress,
             CorePlanStepStatus::Completed => Self::Completed,
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct TurnSettingsAppliedNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub revision: u64,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: Option<ReasoningEffort>,
+}
+
+#[cfg(test)]
+mod live_route_tests {
+    use super::TurnSettingsUpdateParams;
+    #[test]
+    fn live_route_preserves_private_transport_but_redacts_debug() {
+        let params: TurnSettingsUpdateParams = serde_json::from_value(serde_json::json!({
+            "threadId":"thread", "turnId":"turn", "model":"model",
+            "modelRoute":{"providerId":"gateway", "revision":7,
+                "provider":{"name":"Gateway", "http_headers":{"Authorization":"PRIVATE_TEST_MARKER"}}}
+        })).unwrap();
+        assert!(!format!("{params:?}").contains("PRIVATE_TEST_MARKER"));
+        let wire = serde_json::to_value(params).unwrap();
+        assert_eq!(wire["modelRoute"]["revision"], 7);
+        assert_eq!(
+            wire["modelRoute"]["provider"]["http_headers"]["Authorization"],
+            "PRIVATE_TEST_MARKER"
+        );
     }
 }

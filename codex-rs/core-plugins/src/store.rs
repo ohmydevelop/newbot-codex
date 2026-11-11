@@ -170,6 +170,18 @@ impl PluginStore {
         })
     }
 
+    pub(crate) fn pinned_installation(
+        &self,
+        plugin_id: &PluginId,
+        root: AbsolutePathBuf,
+    ) -> ActivePluginInstallation {
+        ActivePluginInstallation {
+            plugin_id: plugin_id.clone(),
+            remote_plugin_install_metadata_path: root.join(".newbot-install-metadata.json"),
+            root,
+        }
+    }
+
     pub fn is_installed(&self, plugin_id: &PluginId) -> bool {
         self.active_plugin_version(plugin_id).is_some()
     }

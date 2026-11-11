@@ -3583,6 +3583,14 @@
           "description": "Operating system for the running app-server target, for example `\"macos\"`, `\"linux\"`, or `\"windows\"`.",
           "type": "string"
         },
+        "runtimeCapabilities": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {},
+          "description": "Runtime extensions supported by this fixed host build.",
+          "type": "object"
+        },
         "userAgent": {
           "type": "string"
         }
@@ -5951,6 +5959,26 @@
             "params"
           ],
           "title": "Thread/compactedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "turn/settings/applied"
+              ],
+              "title": "Turn/settings/appliedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/TurnSettingsAppliedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/settings/appliedNotification",
           "type": "object"
         },
         {
@@ -14858,6 +14886,27 @@
           "data"
         ],
         "title": "ListMcpServerStatusResponse",
+        "type": "object"
+      },
+      "LiveModelRouteSelection": {
+        "additionalProperties": false,
+        "description": "Host-owned route parameters. Debug intentionally excludes credentials.",
+        "properties": {
+          "provider": true,
+          "providerId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "providerId",
+          "revision"
+        ],
         "type": "object"
       },
       "LocalShellAction": {
@@ -27676,6 +27725,47 @@
           "turnId"
         ],
         "title": "TurnPlanUpdatedNotification",
+        "type": "object"
+      },
+      "TurnSettingsAppliedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "effort": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/ReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "providerId",
+          "revision",
+          "threadId",
+          "turnId"
+        ],
+        "title": "TurnSettingsAppliedNotification",
         "type": "object"
       },
       "TurnStartParams": {

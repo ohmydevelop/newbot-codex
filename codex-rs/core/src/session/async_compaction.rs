@@ -24,6 +24,7 @@ use tracing::debug;
 
 #[derive(PartialEq, Eq)]
 struct CompactionAttempt {
+    route_revision: Option<u64>,
     history_version: u64,
     model_slug: String,
     compaction_hash: Option<String>,
@@ -87,6 +88,11 @@ pub(super) async fn maybe_start(
         let mut state = sess.state.lock().await;
         let model_info = &step_context.settings.model_info;
         let attempt = CompactionAttempt {
+            route_revision: step_context
+                .settings
+                .model_route
+                .as_ref()
+                .map(|r| r.revision),
             history_version: state.history.history_version(),
             model_slug: model_info.slug.clone(),
             compaction_hash: model_info.comp_hash.clone(),
@@ -97,7 +103,14 @@ pub(super) async fn maybe_start(
             || state.shutting_down
             || state.async_compaction.last_attempt.as_ref() == Some(&attempt)
             || state.history.annotated_items().is_empty()
-            || sess.services.model_client.auth_owner() != auth_owner
+            || step_context
+                .settings
+                .model_route
+                .as_ref()
+                .map(|r| &r.client)
+                .unwrap_or(&sess.services.model_client)
+                .auth_owner()
+                != auth_owner
         {
             return;
         }
@@ -161,6 +174,16 @@ pub(super) async fn take_ready(
     }
     let mut state = sess.state.lock().await;
     let mut result = state.async_compaction.result.take()?;
+    if state.async_compaction.last_attempt.as_ref()?.route_revision
+        != turn_context
+            .next_step_settings
+            .load()
+            .model_route
+            .as_ref()
+            .map(|r| r.revision)
+    {
+        return None;
+    }
     let candidate = match result.try_recv() {
         Ok(candidate) => candidate,
         Err(oneshot::error::TryRecvError::Empty) => {
@@ -185,10 +208,23 @@ pub(crate) async fn wait_for_pending(
         let result = state.async_compaction.result.take()?;
         let model = &step_context.settings.model_info;
         let attempt = state.async_compaction.last_attempt.as_ref()?;
-        if attempt.history_version != state.history.history_version()
+        if attempt.route_revision
+            != step_context
+                .settings
+                .model_route
+                .as_ref()
+                .map(|r| r.revision)
+            || attempt.history_version != state.history.history_version()
             || attempt.model_slug != model.slug
             || attempt.compaction_hash != model.comp_hash
-            || attempt.auth_owner != sess.services.model_client.auth_owner()
+            || attempt.auth_owner
+                != step_context
+                    .settings
+                    .model_route
+                    .as_ref()
+                    .map(|r| &r.client)
+                    .unwrap_or(&sess.services.model_client)
+                    .auth_owner()
         {
             return None;
         }

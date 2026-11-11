@@ -213,6 +213,18 @@ impl InitializeRequestProcessor {
 
         let user_agent = get_codex_user_agent();
         let response = InitializeResponse {
+            runtime_capabilities: [
+                ("pinnedPluginRoots".to_string(), true),
+                ("sameThreadProviderSwitch".to_string(), true),
+                (
+                    "liveModelRoutes".to_string(),
+                    self.config
+                        .features
+                        .enabled(codex_features::Feature::StepModelSwitching),
+                ),
+            ]
+            .into_iter()
+            .collect(),
             user_agent,
             codex_home,
             platform_family: std::env::consts::FAMILY.to_string(),

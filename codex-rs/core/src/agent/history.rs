@@ -372,6 +372,7 @@ pub(super) async fn prepare_forked_history(
                         EventMsg::ItemCompleted(_)
                             | EventMsg::TokenCount(_)
                             | EventMsg::ThreadGoalUpdated(_)
+                            | EventMsg::TurnSettingsApplied(_)
                             | EventMsg::ThreadSettingsApplied(_),
                     )
                 )

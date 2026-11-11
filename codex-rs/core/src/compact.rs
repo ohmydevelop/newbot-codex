@@ -291,17 +291,26 @@ async fn run_compact_task_inner_impl(
         fallback_instructions.text.clear();
     }
 
-    let max_retries = turn_context.provider.info().stream_max_retries();
+    let settings = turn_context.captured_step_settings();
+    let route = settings.model_route.as_ref();
+    let max_retries = route
+        .map(|r| &r.provider)
+        .unwrap_or(&turn_context.provider)
+        .info()
+        .stream_max_retries();
     let mut retries = 0;
     // Reuse one client session so turn-scoped state (sticky routing and websocket incremental
     // request tracking) survives retries within this compact turn.
-    let mut client_session = sess.services.model_client.new_session();
+    let mut client_session = route
+        .map(|r| &r.client)
+        .unwrap_or(&sess.services.model_client)
+        .new_session();
     let compaction_response = loop {
         // Clone is required because of the loop
         let mut turn_input = history
             .clone()
             .for_prompt(
-                &turn_context.model_info().input_modalities,
+                &settings.model_info.input_modalities,
                 sess.services.image_store.as_ref(),
             )
             .await;
@@ -320,19 +329,23 @@ async fn run_compact_task_inner_impl(
         } else {
             fallback_instructions.clone()
         };
-        let prompt = Prompt {
+        let mut prompt = Prompt {
             input: turn_input,
             base_instructions,
             prompt_cache_ttl: turn_context.prompt_cache_ttl,
             cyber_access_program: turn_context.cyber_access_program,
             ..Default::default()
         };
+        if let Some(route) = route {
+            route.prepare_prompt(&mut prompt)?;
+        }
         let responses_metadata = sess
             .compaction_responses_metadata(turn_context.as_ref(), compaction_metadata)
             .await;
         let attempt_result = drain_to_completed(
             &sess,
             turn_context.as_ref(),
+            &settings,
             &mut client_session,
             &responses_metadata,
             &prompt,
@@ -840,24 +853,22 @@ struct CompactionResponse {
 async fn drain_to_completed(
     sess: &Session,
     turn_context: &TurnContext,
+    settings: &crate::session::step_settings::ResolvedStepSettings,
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     prompt: &Prompt,
     phase: CompactionPhase,
 ) -> CodexResult<CompactionResponse> {
-    let mut includes_reasoning = turn_context.model_info().use_responses_lite;
+    let mut includes_reasoning = settings.model_info.use_responses_lite;
     let mut stream = client_session
         .stream(
             prompt,
-            turn_context.model_info(),
+            &settings.model_info,
             &turn_context.session_telemetry,
-            sess.reasoning_effort_for_request(
-                &turn_context.initial_settings,
-                RequestEffortUsage::Compaction,
-            )
-            .await,
-            turn_context.reasoning_summary(),
-            turn_context.config.service_tier.clone(),
+            sess.reasoning_effort_for_request(settings, RequestEffortUsage::Compaction)
+                .await,
+            settings.reasoning_summary,
+            settings.service_tier.clone(),
             responses_metadata,
             // Rollout tracing currently models remote compaction only; local compaction streams
             // are left untraced until the reducer has a first-class local compaction lifecycle.
@@ -891,7 +902,7 @@ async fn drain_to_completed(
                     for item in std::mem::take(&mut output) {
                         sess.record_annotated_conversation_items(
                             turn_context,
-                            turn_context.model_info(),
+                            &settings.model_info,
                             vec![ResponseItemEnvelope {
                                 item,
                                 metadata: Some(CodexHarnessMetadata {
@@ -924,12 +935,8 @@ async fn drain_to_completed(
             Ok(_) => continue,
             Err(e) => {
                 if let CodexErrorDetails::ResponseIncomplete(incomplete) = e.details() {
-                    sess.record_incomplete_response_usage(
-                        turn_context,
-                        &turn_context.initial_settings,
-                        incomplete,
-                    )
-                    .await;
+                    sess.record_incomplete_response_usage(turn_context, settings, incomplete)
+                        .await;
                     sess.send_token_count_event(turn_context).await;
                 }
                 return Err(e);
