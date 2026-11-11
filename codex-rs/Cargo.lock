@@ -5721,7 +5721,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "codex-utils-absolute-path",
- "constant_time_eq 0.3.1",
+ "constant_time_eq 0.4.2",
  "hmac 0.12.1",
  "http 1.4.0",
  "jsonwebtoken",
